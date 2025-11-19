@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Simulador HTML Fullscreen</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/dexie@3/dist/dexie.js"></script>
     <style>
         /* Fontes e alinhamento cruciais para o highlight funcionar */
         .code-font {
@@ -13,7 +14,7 @@
             line-height: 1.5;
             letter-spacing: normal;
         }
-        
+
         /* Camada do Editor */
         .editor-layer {
             white-space: pre-wrap;
@@ -23,7 +24,7 @@
             border: 0;
             width: 100%;
             height: 100%;
-            overflow: auto; 
+            overflow: auto;
         }
 
         textarea {
@@ -54,7 +55,7 @@
             border-radius: 2px;
             color: transparent;
         }
-        
+
         /* Highlight da seleção atual (foco) */
         mark.current-match {
             background-color: rgba(234, 179, 8, 0.9); /* Amarelo forte */
@@ -68,20 +69,20 @@
             height: 8px;
         }
         ::-webkit-scrollbar-track {
-            background: #1e293b; 
+            background: #1e293b;
         }
         ::-webkit-scrollbar-thumb {
-            background: #475569; 
+            background: #475569;
             border-radius: 4px;
         }
         ::-webkit-scrollbar-thumb:hover {
-            background: #64748b; 
+            background: #64748b;
         }
 
         .tab-content {
             animation: fadeIn 0.2s ease-in-out;
         }
-        
+
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -120,13 +121,13 @@
 
             <!-- Barra de Pesquisa Aprimorada -->
             <div id="search-bar" class="flex items-center bg-slate-900 rounded-lg border border-slate-700 px-2 py-1 gap-1 transition-all">
-                <input 
-                    type="text" 
-                    id="search-input" 
-                    placeholder="Buscar..." 
+                <input
+                    type="text"
+                    id="search-input"
+                    placeholder="Buscar..."
                     class="bg-transparent border-none text-sm text-slate-300 focus:ring-0 w-24 md:w-40 outline-none placeholder-slate-600"
                 >
-                
+
                 <!-- Contador de Resultados -->
                 <span id="search-count" class="text-xs text-slate-500 px-2 border-r border-slate-700 hidden whitespace-nowrap">0 de 0</span>
 
@@ -144,7 +145,7 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="flex items-center gap-2">
             <button onclick="manualSave()" class="text-slate-400 hover:text-green-400 transition-colors p-2 shrink-0" title="Salvar agora">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -161,7 +162,7 @@
 
     <!-- Container Principal -->
     <main class="flex-grow relative">
-        
+
         <!-- ABA EDITOR (Estrutura em camadas para Highlight) -->
         <div id="tab-editor" class="tab-content absolute inset-0 flex flex-col">
             <div class="flex-none bg-slate-800 px-4 py-1 text-xs text-slate-400 border-b border-slate-700 flex justify-between items-center z-20">
@@ -170,16 +171,16 @@
                     <span class="w-2 h-2 rounded-full bg-green-500"></span> Salvo/Atualizado
                 </span>
             </div>
-            
+
             <!-- Container Relativo para sobrepor Backdrop e Textarea -->
             <div class="relative flex-grow w-full h-full bg-[#0d1117] overflow-hidden">
-                
+
                 <!-- 1. Camada de Fundo (Highlight) -->
                 <div id="backdrop" class="editor-layer code-font"></div>
 
                 <!-- 2. Camada de Edição (Textarea Transparente) -->
-                <textarea 
-                    id="source-code" 
+                <textarea
+                    id="source-code"
                     class="editor-layer code-font focus:ring-0"
                     spellcheck="false"
                     placeholder="<!-- Digite seu código HTML aqui... -->"
@@ -190,13 +191,13 @@
 
         <!-- ABA PREVIEW (RESULTADO) -->
         <div id="tab-preview" class="tab-content absolute inset-0 hidden bg-white z-30">
-            <iframe 
-                id="preview-frame" 
+            <iframe
+                id="preview-frame"
                 class="w-full h-full border-none"
                 sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-pointer-lock"
                 title="Resultado"
             ></iframe>
-            
+
             <div id="empty-state" class="hidden absolute inset-0 flex items-center justify-center bg-slate-50 text-slate-400">
                 <div class="text-center">
                     <p class="text-lg">Nenhum código para mostrar.</p>
@@ -271,6 +272,12 @@
 </body>
 </html>`;
 
+        // --- DB SETUP & ELEMENT SELECTION ---
+        const db = new Dexie('HtmlSimDatabase');
+        db.version(1).stores({
+            code: 'id, content' // 'id' is primary key, 'content' holds the code
+        });
+
         const textarea = document.getElementById('source-code');
         const backdrop = document.getElementById('backdrop');
         const previewFrame = document.getElementById('preview-frame');
@@ -279,7 +286,7 @@
         const btnEditor = document.getElementById('btn-editor');
         const btnPreview = document.getElementById('btn-preview');
         const statusIndicator = document.getElementById('status-indicator');
-        
+
         // Elementos de Busca
         const searchBar = document.getElementById('search-bar');
         const searchInput = document.getElementById('search-input');
@@ -289,12 +296,24 @@
         let searchMatches = [];
         let currentMatchIndex = -1;
 
-        // --- CARREGAMENTO INICIAL COM PERSISTÊNCIA ---
-        const savedCode = localStorage.getItem('htmlSim_code');
-        textarea.value = savedCode !== null ? savedCode : defaultCode;
+        // --- CARREGAMENTO INICIAL COM PERSISTÊNCIA (INDEXEDDB) ---
+        (async () => {
+            try {
+                const savedItem = await db.code.get('userCode');
+                const savedCode = savedItem ? savedItem.content : null;
+                textarea.value = savedCode !== null ? savedCode : defaultCode;
+            } catch (error) {
+                console.error("Failed to load from IndexedDB, using default code.", error);
+                textarea.value = defaultCode;
+            } finally {
+                // Initialize UI regardless of load success
+                if (!searchInput.value) backdrop.innerText = textarea.value;
+                runCode();
+            }
+        })();
 
         // --- SINCRONIZAÇÃO DE SCROLL E HIGHLIGHT ---
-        
+
         // Sincroniza o scroll do backdrop com o textarea
         textarea.addEventListener('scroll', () => {
             backdrop.scrollTop = textarea.scrollTop;
@@ -306,7 +325,7 @@
         searchInput.addEventListener('input', () => {
             performSearch();
         });
-        
+
         // Escuta Enter na busca
         searchInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
@@ -318,14 +337,14 @@
         function performSearch() {
             const query = searchInput.value;
             const text = textarea.value;
-            
+
             // Reseta estado
             searchMatches = [];
             currentMatchIndex = -1;
-            
+
             // Atualiza visualização do Highlight
             updateHighlightLayer(text, query);
-            
+
             // Se não tem busca, esconde contador
             if (!query) {
                 searchCount.classList.add('hidden');
@@ -361,10 +380,10 @@
                 // Envolve os termos encontrados em <mark>
                 safeText = safeText.replace(regex, '<mark>$1</mark>');
             }
-            
+
             // Adiciona um espaço no final para corrigir bugs de renderização do scroll
             if (safeText[safeText.length - 1] === "\n") {
-                safeText += " "; 
+                safeText += " ";
             }
 
             backdrop.innerHTML = safeText;
@@ -392,32 +411,32 @@
             updateSearchCount();
             highlightCurrentMatch(match.start);
         }
-        
+
         function highlightCurrentMatch(startIndex) {
             const query = searchInput.value;
             const text = textarea.value;
-            
+
             // Escapa HTML
             let html = "";
             let lastIndex = 0;
-            
+
             // Reconstrói o HTML com as marcas
             const regex = new RegExp(escapeRegExp(query), 'gi');
             let match;
             while ((match = regex.exec(text)) !== null) {
                 // Adiciona texto antes do match
                 html += escapeHtml(text.substring(lastIndex, match.index));
-                
+
                 // Adiciona o match com ou sem destaque extra
                 const isCurrent = match.index === startIndex;
                 const className = isCurrent ? 'current-match' : '';
                 html += `<mark class="${className}">${escapeHtml(match[0])}</mark>`;
-                
+
                 lastIndex = regex.lastIndex;
             }
             // Resto do texto
             html += escapeHtml(text.substring(lastIndex));
-            
+
             if (html[html.length - 1] === "\n") html += " ";
 
             backdrop.innerHTML = html;
@@ -431,7 +450,7 @@
 
                 // Calcula a posição para centralizar o elemento na tela
                 const newScrollTop = elementTop - (parentHeight / 2) + (elementHeight / 2);
-                
+
                 // Aplica o scroll no textarea e força sincronia no backdrop
                 textarea.scrollTop = newScrollTop;
                 backdrop.scrollTop = newScrollTop;
@@ -453,7 +472,7 @@
         function escapeRegExp(string) {
             return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         }
-        
+
         function escapeHtml(text) {
             return text.replace(/[&<>"']/g, m => ({
                 '&': '&amp;',
@@ -467,7 +486,7 @@
         // --- FIM LÓGICA DE BUSCA ---
 
         // --- ATUALIZAÇÃO AUTOMÁTICA E TABS (Mantido e Integrado) ---
-        
+
         function debounce(func, wait) {
             let timeout;
             return function(...args) {
@@ -479,12 +498,12 @@
 
         // Quando o usuário digita no código
         textarea.addEventListener('input', () => {
-            statusIndicator.classList.add('hidden'); 
+            statusIndicator.classList.add('hidden');
             // Atualiza o highlight se houver busca ativa
             if (searchInput.value) performSearch();
             // Sincroniza texto para o backdrop se não houver busca (para manter alinhamento)
             else backdrop.innerText = textarea.value;
-            
+
             autoUpdate();
         });
 
@@ -493,11 +512,11 @@
             saveToStorage();
         }, 500); // Reduzido para 500ms
 
-        function saveToStorage() {
+        async function saveToStorage() {
             try {
-                localStorage.setItem('htmlSim_code', textarea.value);
+                await db.code.put({ id: 'userCode', content: textarea.value });
                 statusIndicator.classList.remove('hidden');
-                
+
                 // Feedback visual temporário no botão de salvar (opcional, mas bom para UX)
                 const saveBtn = document.querySelector('button[title="Salvar agora"]');
                 if(saveBtn) {
@@ -508,8 +527,8 @@
                     }, 1000);
                 }
             } catch (e) {
-                console.error("Erro ao salvar:", e);
-                alert("Não foi possível salvar no armazenamento local do navegador.");
+                console.error("Erro ao salvar no IndexedDB:", e);
+                alert("Ocorreu um erro desconhecido ao tentar salvar o código.");
             }
         }
 
@@ -519,18 +538,13 @@
             textarea.focus();
         }
 
-        // Garante que salva ao fechar/atualizar a aba
-        window.addEventListener('beforeunload', () => {
-            localStorage.setItem('htmlSim_code', textarea.value);
-        });
-
         function switchTab(tabName) {
             if (tabName === 'editor') {
                 tabEditor.classList.remove('hidden');
                 tabPreview.classList.add('hidden');
                 searchBar.classList.remove('hidden');
                 searchBar.classList.add('flex');
-                
+
                 btnEditor.className = "px-4 py-2 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-sm flex items-center gap-2";
                 btnPreview.className = "px-4 py-2 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-2";
             } else {
@@ -548,30 +562,33 @@
 
         function runCode() {
             const code = textarea.value;
-            
+
             if (!code.trim()) {
                 document.getElementById('empty-state').classList.remove('hidden');
                 const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
                 doc.open();
                 doc.write('');
-                doc.close(); 
+                doc.close();
                 return;
             }
-            
+
             document.getElementById('empty-state').classList.add('hidden');
-            
+
             const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
             doc.open();
             doc.write(code);
             doc.close();
         }
 
-        function clearCode() {
+        async function clearCode() {
             if(confirm('Tem certeza que deseja apagar todo o código?')) {
                 textarea.value = '';
                 backdrop.innerText = ''; // Limpa backdrop também
-                // LIMPA O LOCALSTORAGE
-                localStorage.removeItem('htmlSim_code');
+                try {
+                    await db.code.delete('userCode');
+                } catch(e) {
+                    console.error("Erro ao apagar do IndexedDB", e);
+                }
                 textarea.focus();
                 runCode();
             }
@@ -589,10 +606,6 @@
                 else performSearch();
             }
         });
-        
-        // Inicialização do Backdrop e Preview
-        if (!searchInput.value) backdrop.innerText = textarea.value;
-        runCode(); // Roda o código salvo logo no início
     </script>
 </body>
 </html>
