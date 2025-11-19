@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador HTML Fullscreen</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Fontes e alinhamento cruciais para o highlight funcionar */
+        .code-font {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            letter-spacing: normal;
+        }
+        
+        /* Camada do Editor */
+        .editor-layer {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            padding: 1rem;
+            margin: 0;
+            border: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto; 
+        }
+
+        textarea {
+            resize: none;
+            outline: none;
+            background-color: transparent; /* Transparente para ver o highlight atrás */
+            color: #4ade80; /* green-400 */
+            caret-color: white;
+            z-index: 10; /* Fica na frente */
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        /* Camada de Highlight (Fundo) */
+        #backdrop {
+            z-index: 5; /* Atrás do textarea */
+            position: absolute;
+            top: 0;
+            left: 0;
+            color: transparent; /* Texto invisível, só mostra o fundo do mark */
+            pointer-events: none; /* Deixa o clique passar para o textarea */
+        }
+
+        mark {
+            background-color: rgba(234, 179, 8, 0.4); /* Amarelo translúcido */
+            border-bottom: 2px solid #eab308;
+            border-radius: 2px;
+            color: transparent;
+        }
+        
+        /* Highlight da seleção atual (foco) */
+        mark.current-match {
+            background-color: rgba(234, 179, 8, 0.9); /* Amarelo forte */
+            border: 1px solid white;
+            box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1e293b; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b; 
+        }
+
+        .tab-content {
+            animation: fadeIn 0.2s ease-in-out;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-200 h-screen flex flex-col overflow-hidden">
+
+    <!-- Cabeçalho -->
+    <header class="flex-none bg-slate-800 border-b border-slate-700 p-4 flex items-center justify-between shadow-md z-20 gap-4">
+        <div class="flex items-center gap-2 shrink-0">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+            </svg>
+            <h1 class="font-bold text-lg tracking-wide text-white hidden md:block">HTML<span class="text-blue-400">Sim</span></h1>
+        </div>
+
+        <!-- Barra de Ferramentas Central -->
+        <div class="flex items-center gap-4 flex-grow justify-center md:justify-start">
+            <!-- Botões das Abas -->
+            <div class="flex bg-slate-900 rounded-lg p-1 border border-slate-700 shrink-0">
+                <button id="btn-editor" onclick="switchTab('editor')" class="px-4 py-2 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-sm flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    Código
+                </button>
+                <button id="btn-preview" onclick="switchTab('preview')" class="px-4 py-2 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    Resultado
+                </button>
+            </div>
+
+            <!-- Barra de Pesquisa Aprimorada -->
+            <div id="search-bar" class="flex items-center bg-slate-900 rounded-lg border border-slate-700 px-2 py-1 gap-1 transition-all">
+                <input 
+                    type="text" 
+                    id="search-input" 
+                    placeholder="Buscar..." 
+                    class="bg-transparent border-none text-sm text-slate-300 focus:ring-0 w-24 md:w-40 outline-none placeholder-slate-600"
+                >
+                
+                <!-- Contador de Resultados -->
+                <span id="search-count" class="text-xs text-slate-500 px-2 border-r border-slate-700 hidden whitespace-nowrap">0 de 0</span>
+
+                <div class="flex pl-1 gap-1">
+                    <button onclick="navigateSearch(-1)" class="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors" title="Anterior">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                        </svg>
+                    </button>
+                    <button onclick="navigateSearch(1)" class="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors" title="Próximo">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <button onclick="clearCode()" class="text-slate-400 hover:text-red-400 transition-colors p-2 shrink-0" title="Limpar código">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+        </button>
+    </header>
+
+    <!-- Container Principal -->
+    <main class="flex-grow relative">
+        
+        <!-- ABA EDITOR (Estrutura em camadas para Highlight) -->
+        <div id="tab-editor" class="tab-content absolute inset-0 flex flex-col">
+            <div class="flex-none bg-slate-800 px-4 py-1 text-xs text-slate-400 border-b border-slate-700 flex justify-between items-center z-20">
+                <span>index.html</span>
+                <span id="status-indicator" class="text-green-500 flex items-center gap-1 hidden">
+                    <span class="w-2 h-2 rounded-full bg-green-500"></span> Salvo/Atualizado
+                </span>
+            </div>
+            
+            <!-- Container Relativo para sobrepor Backdrop e Textarea -->
+            <div class="relative flex-grow w-full h-full bg-[#0d1117] overflow-hidden">
+                
+                <!-- 1. Camada de Fundo (Highlight) -->
+                <div id="backdrop" class="editor-layer code-font"></div>
+
+                <!-- 2. Camada de Edição (Textarea Transparente) -->
+                <textarea 
+                    id="source-code" 
+                    class="editor-layer code-font focus:ring-0"
+                    spellcheck="false"
+                    placeholder="<!-- Digite seu código HTML aqui... -->"
+                ></textarea>
+
+            </div>
+        </div>
+
+        <!-- ABA PREVIEW (RESULTADO) -->
+        <div id="tab-preview" class="tab-content absolute inset-0 hidden bg-white z-30">
+            <iframe 
+                id="preview-frame" 
+                class="w-full h-full border-none"
+                sandbox="allow-scripts allow-modals allow-same-origin allow-forms allow-pointer-lock"
+                title="Resultado"
+            ></iframe>
+            
+            <div id="empty-state" class="hidden absolute inset-0 flex items-center justify-center bg-slate-50 text-slate-400">
+                <div class="text-center">
+                    <p class="text-lg">Nenhum código para mostrar.</p>
+                    <p class="text-sm">Volte para o editor e comece a criar!</p>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // Código inicial padrão
+        const defaultCode = `<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {
+    font-family: sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+  .card {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 2rem;
+    border-radius: 1rem;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+    text-align: center;
+    transform: translateY(0);
+    transition: transform 0.3s ease;
+  }
+  .card:hover {
+    transform: translateY(-10px);
+  }
+  h1 { margin-bottom: 0.5rem; }
+  button {
+    margin-top: 1rem;
+    padding: 10px 20px;
+    border: none;
+    border-radius: 20px;
+    background: white;
+    color: #764ba2;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  button:hover {
+    background: #f0f0f0;
+  }
+</style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>Olá, Mundo!</h1>
+    <p>Este é o seu simulador HTML.</p>
+    <button onclick="mudarTexto()">Clique aqui</button>
+  </div>
+
+<script>
+  function mudarTexto() {
+    const h1 = document.querySelector('h1');
+    h1.innerText = "Funcionou! 🚀";
+    h1.style.color = "#ffdfba";
+  }
+<\/script>
+</body>
+</html>`;
+
+        const textarea = document.getElementById('source-code');
+        const backdrop = document.getElementById('backdrop');
+        const previewFrame = document.getElementById('preview-frame');
+        const tabEditor = document.getElementById('tab-editor');
+        const tabPreview = document.getElementById('tab-preview');
+        const btnEditor = document.getElementById('btn-editor');
+        const btnPreview = document.getElementById('btn-preview');
+        const statusIndicator = document.getElementById('status-indicator');
+        
+        // Elementos de Busca
+        const searchBar = document.getElementById('search-bar');
+        const searchInput = document.getElementById('search-input');
+        const searchCount = document.getElementById('search-count');
+
+        // Variáveis de Estado
+        let searchMatches = [];
+        let currentMatchIndex = -1;
+
+        // --- CARREGAMENTO INICIAL COM PERSISTÊNCIA ---
+        const savedCode = localStorage.getItem('htmlSim_code');
+        textarea.value = savedCode !== null ? savedCode : defaultCode;
+
+        // --- SINCRONIZAÇÃO DE SCROLL E HIGHLIGHT ---
+        
+        // Sincroniza o scroll do backdrop com o textarea
+        textarea.addEventListener('scroll', () => {
+            backdrop.scrollTop = textarea.scrollTop;
+        });
+
+        // --- LÓGICA DE BUSCA AVANÇADA ---
+
+        // Escuta a digitação na busca
+        searchInput.addEventListener('input', () => {
+            performSearch();
+        });
+        
+        // Escuta Enter na busca
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                navigateSearch(1);
+            }
+        });
+
+        function performSearch() {
+            const query = searchInput.value;
+            const text = textarea.value;
+            
+            // Reseta estado
+            searchMatches = [];
+            currentMatchIndex = -1;
+            
+            // Atualiza visualização do Highlight
+            updateHighlightLayer(text, query);
+            
+            // Se não tem busca, esconde contador
+            if (!query) {
+                searchCount.classList.add('hidden');
+                return;
+            }
+
+            // Encontra todas as ocorrências (Case Insensitive)
+            const regex = new RegExp(escapeRegExp(query), 'gi');
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+                searchMatches.push({
+                    start: match.index,
+                    end: match.index + query.length
+                });
+            }
+
+            // Atualiza contador
+            updateSearchCount();
+        }
+
+        function updateHighlightLayer(text, query) {
+            // Previne injeção de HTML na camada de fundo e mantém quebras de linha
+            let safeText = text.replace(/[&<>"']/g, m => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            }[m]));
+
+            if (query) {
+                const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+                // Envolve os termos encontrados em <mark>
+                safeText = safeText.replace(regex, '<mark>$1</mark>');
+            }
+            
+            // Adiciona um espaço no final para corrigir bugs de renderização do scroll
+            if (safeText[safeText.length - 1] === "\n") {
+                safeText += " "; 
+            }
+
+            backdrop.innerHTML = safeText;
+        }
+
+        function navigateSearch(direction) {
+            if (searchMatches.length === 0) return;
+
+            // Calcula o novo índice circular
+            if (currentMatchIndex === -1) {
+                // Se não selecionou nada ainda
+                currentMatchIndex = direction > 0 ? 0 : searchMatches.length - 1;
+            } else {
+                currentMatchIndex += direction;
+                if (currentMatchIndex >= searchMatches.length) currentMatchIndex = 0;
+                if (currentMatchIndex < 0) currentMatchIndex = searchMatches.length - 1;
+            }
+
+            const match = searchMatches[currentMatchIndex];
+
+            // Seleciona o texto no textarea
+            textarea.focus();
+            textarea.setSelectionRange(match.start, match.end);
+
+            updateSearchCount();
+            highlightCurrentMatch(match.start);
+        }
+        
+        function highlightCurrentMatch(startIndex) {
+            const query = searchInput.value;
+            const text = textarea.value;
+            
+            // Escapa HTML
+            let html = "";
+            let lastIndex = 0;
+            
+            // Reconstrói o HTML com as marcas
+            const regex = new RegExp(escapeRegExp(query), 'gi');
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+                // Adiciona texto antes do match
+                html += escapeHtml(text.substring(lastIndex, match.index));
+                
+                // Adiciona o match com ou sem destaque extra
+                const isCurrent = match.index === startIndex;
+                const className = isCurrent ? 'current-match' : '';
+                html += `<mark class="${className}">${escapeHtml(match[0])}</mark>`;
+                
+                lastIndex = regex.lastIndex;
+            }
+            // Resto do texto
+            html += escapeHtml(text.substring(lastIndex));
+            
+            if (html[html.length - 1] === "\n") html += " ";
+
+            backdrop.innerHTML = html;
+
+            // === LÓGICA DE SCROLL AUTOMÁTICO PARA CENTRALIZAR ===
+            const currentMark = backdrop.querySelector('.current-match');
+            if (currentMark) {
+                const parentHeight = textarea.clientHeight;
+                const elementTop = currentMark.offsetTop;
+                const elementHeight = currentMark.offsetHeight;
+
+                // Calcula a posição para centralizar o elemento na tela
+                const newScrollTop = elementTop - (parentHeight / 2) + (elementHeight / 2);
+                
+                // Aplica o scroll no textarea e força sincronia no backdrop
+                textarea.scrollTop = newScrollTop;
+                backdrop.scrollTop = newScrollTop;
+            }
+        }
+
+        function updateSearchCount() {
+            searchCount.classList.remove('hidden');
+            if (searchMatches.length === 0) {
+                searchCount.innerText = "0 de 0";
+            } else {
+                // Mostra índice + 1 (humano)
+                const displayIndex = currentMatchIndex === -1 ? 0 : currentMatchIndex + 1;
+                searchCount.innerText = `${displayIndex} de ${searchMatches.length}`;
+            }
+        }
+
+        // Utilitários de String
+        function escapeRegExp(string) {
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+        
+        function escapeHtml(text) {
+            return text.replace(/[&<>"']/g, m => ({
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            }[m]));
+        }
+
+        // --- FIM LÓGICA DE BUSCA ---
+
+        // --- ATUALIZAÇÃO AUTOMÁTICA E TABS (Mantido e Integrado) ---
+        
+        function debounce(func, wait) {
+            let timeout;
+            return function(...args) {
+                const context = this;
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(context, args), wait);
+            };
+        }
+
+        // Quando o usuário digita no código
+        textarea.addEventListener('input', () => {
+            statusIndicator.classList.add('hidden'); 
+            // Atualiza o highlight se houver busca ativa
+            if (searchInput.value) performSearch();
+            // Sincroniza texto para o backdrop se não houver busca (para manter alinhamento)
+            else backdrop.innerText = textarea.value;
+            
+            autoUpdate();
+        });
+
+        const autoUpdate = debounce(() => {
+            runCode();
+            // SALVA NO LOCALSTORAGE
+            localStorage.setItem('htmlSim_code', textarea.value);
+            statusIndicator.classList.remove('hidden'); 
+        }, 1000); 
+
+        function switchTab(tabName) {
+            if (tabName === 'editor') {
+                tabEditor.classList.remove('hidden');
+                tabPreview.classList.add('hidden');
+                searchBar.classList.remove('hidden');
+                searchBar.classList.add('flex');
+                
+                btnEditor.className = "px-4 py-2 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-sm flex items-center gap-2";
+                btnPreview.className = "px-4 py-2 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-2";
+            } else {
+                tabEditor.classList.add('hidden');
+                tabPreview.classList.remove('hidden');
+                searchBar.classList.add('hidden');
+                searchBar.classList.remove('flex');
+
+                btnPreview.className = "px-4 py-2 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-sm flex items-center gap-2";
+                btnEditor.className = "px-4 py-2 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white flex items-center gap-2";
+
+                runCode();
+            }
+        }
+
+        function runCode() {
+            const code = textarea.value;
+            
+            if (!code.trim()) {
+                document.getElementById('empty-state').classList.remove('hidden');
+                const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
+                doc.open();
+                doc.write('');
+                doc.close(); 
+                return;
+            }
+            
+            document.getElementById('empty-state').classList.add('hidden');
+            
+            const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
+            doc.open();
+            doc.write(code);
+            doc.close();
+        }
+
+        function clearCode() {
+            if(confirm('Tem certeza que deseja apagar todo o código?')) {
+                textarea.value = '';
+                backdrop.innerText = ''; // Limpa backdrop também
+                // LIMPA O LOCALSTORAGE
+                localStorage.removeItem('htmlSim_code');
+                textarea.focus();
+                runCode();
+            }
+        }
+
+        textarea.addEventListener('keydown', function(e) {
+            if (e.key == 'Tab') {
+                e.preventDefault();
+                var start = this.selectionStart;
+                var end = this.selectionEnd;
+                this.value = this.value.substring(0, start) + "  " + this.value.substring(end);
+                this.selectionStart = this.selectionEnd = start + 2;
+                // Atualiza backdrop após tab
+                if (!searchInput.value) backdrop.innerText = this.value;
+                else performSearch();
+            }
+        });
+        
+        // Inicialização do Backdrop e Preview
+        if (!searchInput.value) backdrop.innerText = textarea.value;
+        runCode(); // Roda o código salvo logo no início
+    </script>
+</body>
+</html>
